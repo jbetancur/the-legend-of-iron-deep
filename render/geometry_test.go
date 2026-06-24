@@ -11,6 +11,27 @@ func approxEq(a, b float64) bool {
 	return math.Abs(a-b) < epsilon
 }
 
+// --- Cells are square, sized from ViewportH ---
+
+func TestCellsAreSquare(t *testing.T) {
+	for depth := 0; depth <= 3; depth++ {
+		c := cellRect(depth, 0)
+		if !approxEq(c.w, c.h) {
+			t.Errorf("depth %d: cell not square (w=%f, h=%f)", depth, c.w, c.h)
+		}
+	}
+}
+
+func TestDepthZeroSideEqualsViewportH(t *testing.T) {
+	c := cellRect(0, 0)
+	if !approxEq(c.w, float64(ViewportH)) {
+		t.Errorf("depth 0 side = %f, want %f (ViewportH)", c.w, float64(ViewportH))
+	}
+	if !approxEq(c.h, float64(ViewportH)) {
+		t.Errorf("depth 0 side = %f, want %f (ViewportH)", c.h, float64(ViewportH))
+	}
+}
+
 // --- Scaling: each layer is 50% the size of the previous layer ---
 
 func TestCellScaling(t *testing.T) {
@@ -23,16 +44,6 @@ func TestCellScaling(t *testing.T) {
 		if !approxEq(next.h, c.h*0.5) {
 			t.Errorf("depth %d->%d: height should halve (got %f, want %f)", depth, depth+1, next.h, c.h*0.5)
 		}
-	}
-}
-
-func TestDepthZeroIsFullViewport(t *testing.T) {
-	c := cellRect(0, 0)
-	if !approxEq(c.w, float64(ViewportW)) {
-		t.Errorf("depth 0 width = %f, want %f", c.w, float64(ViewportW))
-	}
-	if !approxEq(c.h, float64(ViewportH)) {
-		t.Errorf("depth 0 height = %f, want %f", c.h, float64(ViewportH))
 	}
 }
 
@@ -64,9 +75,6 @@ func TestBackWallIsCenterHalf(t *testing.T) {
 }
 
 // --- Critical nesting property: BackWall(depth N, col) == CellRect(depth N+1, col) ---
-// The back wall at ANY column must equal the next depth's cell at the same column.
-// This ensures side walls converge toward the global vanishing point, not each
-// cell's own center. Previously only worked for col 0.
 
 func TestNestingProperty(t *testing.T) {
 	for depth := 0; depth <= 3; depth++ {
@@ -114,23 +122,15 @@ func TestVanishingPointCentering(t *testing.T) {
 	}
 }
 
-// --- Column count: 2*depth + 1 cells per layer ---
+// --- Column count covers at least the SBS minimum ---
 
-func TestColumnCount(t *testing.T) {
-	cases := []struct {
-		depth int
-		want  int
-	}{
-		{0, 3},
-		{1, 5},
-		{2, 7},
-		{3, 9},
-	}
-	for _, tc := range cases {
-		min, max := columnRange(tc.depth)
-		got := max - min + 1
-		if got != tc.want {
-			t.Errorf("depth %d: column count = %d, want %d", tc.depth, got, tc.want)
+func TestColumnRangeCoversMinimum(t *testing.T) {
+	for depth := 0; depth <= 3; depth++ {
+		minCol, maxCol := columnRange(depth)
+		got := maxCol - minCol + 1
+		sbsMin := 2*(depth+1) + 1
+		if got < sbsMin {
+			t.Errorf("depth %d: column count = %d, want at least %d", depth, got, sbsMin)
 		}
 	}
 }
@@ -162,7 +162,6 @@ func TestWallQuadGeometry(t *testing.T) {
 		c := cellRect(depth, 0)
 		bw := backWallRect(depth, 0)
 
-		// Left wall: outer = cell left edge, inner = back wall left edge
 		lx0, ly0, lx1, ly1, _, ly2, lx3, ly3 := leftWallQuad(depth, 0)
 		if !approxEq(lx0, c.left()) || !approxEq(lx3, c.left()) {
 			t.Errorf("depth %d: left wall outer not at cell left", depth)
@@ -177,7 +176,6 @@ func TestWallQuadGeometry(t *testing.T) {
 			t.Errorf("depth %d: left wall inner should span back wall height", depth)
 		}
 
-		// Right wall: outer = cell right edge, inner = back wall right edge
 		_, ry0, rx1, _, rx2, ry2, _, ry3 := rightWallQuad(depth, 0)
 		if !approxEq(rx1, c.right()) || !approxEq(rx2, c.right()) {
 			t.Errorf("depth %d: right wall outer not at cell right", depth)
@@ -191,6 +189,52 @@ func TestWallQuadGeometry(t *testing.T) {
 	}
 }
 
+// --- Floor quad connects cell bottom to back wall bottom ---
+
+func TestFloorQuadGeometry(t *testing.T) {
+	for depth := 0; depth <= 3; depth++ {
+		c := cellRect(depth, 0)
+		bw := backWallRect(depth, 0)
+
+		x0, y0, x1, y1, x2, y2, x3, y3 := floorQuad(depth, 0)
+		if !approxEq(x0, c.left()) || !approxEq(y0, c.bottom()) {
+			t.Errorf("depth %d: floor TL should be cell bottom-left", depth)
+		}
+		if !approxEq(x1, c.right()) || !approxEq(y1, c.bottom()) {
+			t.Errorf("depth %d: floor TR should be cell bottom-right", depth)
+		}
+		if !approxEq(x2, bw.right()) || !approxEq(y2, bw.bottom()) {
+			t.Errorf("depth %d: floor BR should be backwall bottom-right", depth)
+		}
+		if !approxEq(x3, bw.left()) || !approxEq(y3, bw.bottom()) {
+			t.Errorf("depth %d: floor BL should be backwall bottom-left", depth)
+		}
+	}
+}
+
+// --- Ceiling quad connects cell top to back wall top ---
+
+func TestCeilingQuadGeometry(t *testing.T) {
+	for depth := 0; depth <= 3; depth++ {
+		c := cellRect(depth, 0)
+		bw := backWallRect(depth, 0)
+
+		x0, y0, x1, y1, x2, y2, x3, y3 := ceilingQuad(depth, 0)
+		if !approxEq(x0, c.left()) || !approxEq(y0, c.top()) {
+			t.Errorf("depth %d: ceiling TL should be cell top-left", depth)
+		}
+		if !approxEq(x1, c.right()) || !approxEq(y1, c.top()) {
+			t.Errorf("depth %d: ceiling TR should be cell top-right", depth)
+		}
+		if !approxEq(x2, bw.right()) || !approxEq(y2, bw.top()) {
+			t.Errorf("depth %d: ceiling BR should be backwall top-right", depth)
+		}
+		if !approxEq(x3, bw.left()) || !approxEq(y3, bw.top()) {
+			t.Errorf("depth %d: ceiling BL should be backwall top-left", depth)
+		}
+	}
+}
+
 // --- Side wall quads at off-center columns converge to vanishing point ---
 
 func TestSideWallsConvergeToVanishingPoint(t *testing.T) {
@@ -199,14 +243,12 @@ func TestSideWallsConvergeToVanishingPoint(t *testing.T) {
 	for depth := 0; depth <= 2; depth++ {
 		minCol, maxCol := columnRange(depth)
 		for col := minCol; col <= maxCol; col++ {
-			// Left wall: inner X must be closer to VP center than outer X
 			lxOuter, _, lxInner, _, _, _, _, _ := leftWallQuad(depth, col)
 			if math.Abs(lxInner-vpCX) > math.Abs(lxOuter-vpCX)+epsilon {
 				t.Errorf("depth %d col %d: left wall inner X (%.1f) farther from VP center (%.1f) than outer X (%.1f)",
 					depth, col, lxInner, vpCX, lxOuter)
 			}
 
-			// Right wall: inner X must be closer to VP center than outer X
 			rxInner, _, rxOuter, _, _, _, _, _ := rightWallQuad(depth, col)
 			if math.Abs(rxInner-vpCX) > math.Abs(rxOuter-vpCX)+epsilon {
 				t.Errorf("depth %d col %d: right wall inner X (%.1f) farther from VP center (%.1f) than outer X (%.1f)",
@@ -249,28 +291,6 @@ func TestCellsShareVerticalPosition(t *testing.T) {
 }
 
 // --- Back walls at any column have the same dimensions as the next layer's cells ---
-// The back wall SIZE should always equal the next depth's cell size (both halve),
-// even though off-center back walls have different positions.
-
-// --- Shading: 50% brightness per depth, smooth per-vertex interpolation ---
-
-func TestCellShade50PercentPerLayer(t *testing.T) {
-	cases := []struct {
-		depth int
-		want  float32
-	}{
-		{0, 1.0},
-		{1, 0.5},
-		{2, 0.25},
-		{3, 0.125},
-	}
-	for _, tc := range cases {
-		got := cellShade(tc.depth)
-		if math.Abs(float64(got-tc.want)) > 0.001 {
-			t.Errorf("cellShade(%d) = %f, want %f", tc.depth, got, tc.want)
-		}
-	}
-}
 
 func TestBackWallSizeMatchesNextLayer(t *testing.T) {
 	for depth := 0; depth <= 2; depth++ {
@@ -286,6 +306,26 @@ func TestBackWallSizeMatchesNextLayer(t *testing.T) {
 				t.Errorf("depth %d col %d: backWall.h=%f != nextLayer cellH=%f",
 					depth, col, bw.h, next.h)
 			}
+		}
+	}
+}
+
+// --- Shading: 50% brightness per depth ---
+
+func TestCellShade50PercentPerLayer(t *testing.T) {
+	cases := []struct {
+		depth int
+		want  float32
+	}{
+		{0, 1.0},
+		{1, 0.5},
+		{2, 0.25},
+		{3, 0.125},
+	}
+	for _, tc := range cases {
+		got := cellShade(tc.depth)
+		if math.Abs(float64(got-tc.want)) > 0.001 {
+			t.Errorf("cellShade(%d) = %f, want %f", tc.depth, got, tc.want)
 		}
 	}
 }

@@ -11,7 +11,7 @@ const (
 	ScreenW       = 1920
 	ScreenH       = 1080
 	BaseViewportH = 540
-	maxDepth      = 2
+	maxDepth      = 3
 )
 
 var (
@@ -37,15 +37,6 @@ func NewViewport(assets *Assets, screenW, screenH int) *Viewport {
 func (v *Viewport) Draw(screen *ebiten.Image, party *engine.Party) {
 	v.Image.Fill(color.RGBA{5, 4, 3, 255})
 
-	midY := float64(ViewportH) / 2
-	vpW := float64(ViewportW)
-	vpH := float64(ViewportH)
-	darkest := cellShade(maxDepth + 1)
-	v.drawQuad(v.Assets.Ceiling, 0, 0, vpW, 0, vpW, midY, 0, midY,
-		[4]float32{1, 1, darkest, darkest})
-	v.drawQuad(v.Assets.Floor, 0, midY, vpW, midY, vpW, vpH, 0, vpH,
-		[4]float32{darkest, darkest, 1, 1})
-
 	for depth := maxDepth; depth >= 0; depth-- {
 		minCol, maxCol := columnRange(depth)
 		for col := minCol; col <= maxCol; col++ {
@@ -54,6 +45,8 @@ func (v *Viewport) Draw(screen *ebiten.Image, party *engine.Party) {
 	}
 
 	sw, sh := screen.Bounds().Dx(), screen.Bounds().Dy()
+	vpW := float64(ViewportW)
+	vpH := float64(ViewportH)
 	op := &ebiten.DrawImageOptions{}
 	op.GeoM.Scale(float64(sw)/vpW, float64(sh)/vpH)
 	screen.DrawImage(v.Image, op)
@@ -70,6 +63,7 @@ func (v *Viewport) drawCell(party *engine.Party, depth, col int) {
 	cy := party.Y + dy*depth + ldy*(-col)
 
 	shade := cellShade(depth)
+	innerShade := shade * 0.5
 
 	if !w.IsPassable(cx, cy) {
 		if depth > 0 {
@@ -82,9 +76,21 @@ func (v *Viewport) drawCell(party *engine.Party, depth, col int) {
 		return
 	}
 
-	// Outer edge (cell boundary) = current depth shade; inner edge (back wall) = next depth shade.
-	innerShade := shade * 0.5
+	// Floor trapezoid — near edge bright, far edge dark.
+	{
+		x0, y0, x1, y1, x2, y2, x3, y3 := floorQuad(depth, col)
+		s := [4]float32{shade, shade, innerShade, innerShade}
+		v.drawQuad(v.Assets.Floor, x0, y0, x1, y1, x2, y2, x3, y3, s)
+	}
 
+	// Ceiling trapezoid.
+	{
+		x0, y0, x1, y1, x2, y2, x3, y3 := ceilingQuad(depth, col)
+		s := [4]float32{shade, shade, innerShade, innerShade}
+		v.drawQuad(v.Assets.Ceiling, x0, y0, x1, y1, x2, y2, x3, y3, s)
+	}
+
+	// Left side wall.
 	leftCellX := cx + ldx
 	leftCellY := cy + ldy
 	if w.IsWall(leftCellX, leftCellY) {
@@ -95,8 +101,23 @@ func (v *Viewport) drawCell(party *engine.Party, depth, col int) {
 			tex = v.Assets.DoorFrameL
 		}
 		v.drawQuad(tex, x0, y0, x1, y1, x2, y2, x3, y3, s)
+
+		if depth == 0 {
+			c := cellRect(0, col)
+			leftEdge := cellRect(0, col-1).left()
+			if leftEdge < 0 {
+				leftEdge = 0
+			}
+			if leftEdge < c.left() {
+				v.blitRect(tex, rect{
+					x: leftEdge, y: c.top(),
+					w: c.left() - leftEdge, h: c.h,
+				}, shade)
+			}
+		}
 	}
 
+	// Right side wall.
 	rightCellX := cx - ldx
 	rightCellY := cy - ldy
 	if w.IsWall(rightCellX, rightCellY) {
@@ -107,8 +128,24 @@ func (v *Viewport) drawCell(party *engine.Party, depth, col int) {
 			tex = v.Assets.DoorFrameR
 		}
 		v.drawQuad(tex, x0, y0, x1, y1, x2, y2, x3, y3, s)
+
+		if depth == 0 {
+			c := cellRect(0, col)
+			rightEdge := cellRect(0, col+1).right()
+			vpW := float64(ViewportW)
+			if rightEdge > vpW {
+				rightEdge = vpW
+			}
+			if rightEdge > c.right() {
+				v.blitRect(tex, rect{
+					x: c.right(), y: c.top(),
+					w: rightEdge - c.right(), h: c.h,
+				}, shade)
+			}
+		}
 	}
 
+	// Back wall (ahead).
 	aheadX := cx + dx
 	aheadY := cy + dy
 	if w.IsWall(aheadX, aheadY) {
@@ -126,6 +163,7 @@ func (v *Viewport) drawCell(party *engine.Party, depth, col int) {
 		}
 	}
 
+	// Monsters.
 	monsters := w.MonstersAt(cx, cy)
 	count := len(monsters)
 	if count > 2 {

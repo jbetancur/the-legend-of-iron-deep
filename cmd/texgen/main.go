@@ -123,15 +123,14 @@ func generateWall() image.Image {
 	n3 := newNoise(999)
 	rng := rand.New(rand.NewSource(7))
 
-	// Stone block layout
 	type block struct {
 		x, y, w, h int
-		rOff, gOff, bOff float64
+		valOff      float64
 	}
 
 	var blocks []block
-	rowH := []int{58, 62, 54, 66, 56, 60, 64, 52}
-	mortarW := 3
+	rowH := []int{116, 124, 108, 132, 112, 120, 128, 104}
+	mortarW := 6
 	y := 0
 	row := 0
 	for y < texH {
@@ -139,7 +138,7 @@ func generateWall() image.Image {
 		if y+h > texH {
 			h = texH - y
 		}
-		colW := []int{72, 88, 64, 96, 80, 70, 92, 76}
+		colW := []int{144, 176, 128, 192, 160, 140, 184, 152}
 		offset := 0
 		if row%2 == 1 {
 			offset = colW[0] / 2
@@ -150,9 +149,7 @@ func generateWall() image.Image {
 			w := colW[col%len(colW)]
 			blocks = append(blocks, block{
 				x: x, y: y, w: w, h: h,
-				rOff: rng.Float64()*16 - 8,
-				gOff: rng.Float64()*16 - 8,
-				bOff: rng.Float64()*12 - 6,
+				valOff: rng.Float64()*16 - 8,
 			})
 			x += w + mortarW
 			col++
@@ -161,16 +158,14 @@ func generateWall() image.Image {
 		row++
 	}
 
-	// Base colors
-	baseR, baseG, baseB := 115.0, 105.0, 90.0
-	mortarR, mortarG, mortarB := 55.0, 50.0, 42.0
+	base := 145.0
+	mortarBase := 45.0
 
 	for py := 0; py < texH; py++ {
 		for px := 0; px < texW; px++ {
 			fx := float64(px) / float64(texW)
 			fy := float64(py) / float64(texH)
 
-			// Determine if pixel is mortar or stone
 			inMortar := false
 			var blk *block
 			for i := range blocks {
@@ -180,7 +175,6 @@ func generateWall() image.Image {
 					bx += texW
 				}
 				if bx >= b.x && bx < b.x+b.w && py >= b.y && py < b.y+b.h {
-					// Check if near edge (mortar zone)
 					dx := min(bx-b.x, b.x+b.w-1-bx)
 					dy := min(py-b.y, b.y+b.h-1-py)
 					if dx < mortarW || dy < mortarW {
@@ -192,46 +186,24 @@ func generateWall() image.Image {
 				}
 			}
 
-			var r, g, b float64
+			var v float64
 			if inMortar || blk == nil {
-				// Mortar with slight noise
-				mn := n1.fbm(fx*20, fy*20, 3, 2.0, 0.5) * 10
-				r = mortarR + mn
-				g = mortarG + mn*0.9
-				b = mortarB + mn*0.8
-				// Mortar depth shadow
-				r *= 0.85
-				g *= 0.85
-				b *= 0.85
+				mn := n1.fbm(fx*20, fy*20, 3, 2.0, 0.5) * 6
+				v = mortarBase + mn
 			} else {
-				// Stone surface
-				// Large-scale color variation per block
-				r = baseR + blk.rOff
-				g = baseG + blk.gOff
-				b = baseB + blk.bOff
+				v = base + blk.valOff
 
-				// Multi-octave noise for surface texture
-				surf := n1.fbm(fx*8+blk.rOff, fy*8+blk.gOff, 5, 2.2, 0.55)
-				r += surf * 20
-				g += surf * 18
-				b += surf * 15
+				surf := n1.fbm(fx*6+blk.valOff*0.1, fy*6+blk.valOff*0.1, 5, 2.2, 0.55)
+				v += surf * 22
 
-				// Fine grain noise
-				grain := n2.fbm(fx*32, fy*32, 3, 2.0, 0.5)
-				r += grain * 8
-				g += grain * 7
-				b += grain * 6
+				grain := n2.fbm(fx*24, fy*24, 4, 2.0, 0.5)
+				v += grain * 10
 
-				// Subtle cracks/veins
-				crack := n3.fbm(fx*12, fy*12, 4, 2.5, 0.6)
-				if crack > 0.35 {
-					darkening := (crack - 0.35) * 30
-					r -= darkening
-					g -= darkening
-					b -= darkening
+				crack := n3.fbm(fx*10, fy*10, 4, 2.5, 0.6)
+				if crack > 0.3 {
+					v -= (crack - 0.3) * 35
 				}
 
-				// Edge darkening within each stone (ambient occlusion)
 				bx := px
 				if bx < blk.x {
 					bx += texW
@@ -239,31 +211,18 @@ func generateWall() image.Image {
 				dx := float64(min(bx-blk.x, blk.x+blk.w-1-bx))
 				dy := float64(min(py-blk.y, blk.y+blk.h-1-py))
 				edgeDist := math.Min(dx, dy)
-				if edgeDist < 8 {
-					ao := 1.0 - (8-edgeDist)/8*0.25
-					r *= ao
-					g *= ao
-					b *= ao
+				if edgeDist < 12 {
+					v *= 1.0 - (12-edgeDist)/12*0.3
 				}
 
-				// Occasional darker staining patches
 				stain := n2.fbm(fx*4+0.5, fy*4+0.5, 3, 2.0, 0.5)
-				if stain > 0.3 {
-					factor := 1.0 - (stain-0.3)*0.3
-					r *= factor
-					g *= factor
-					b *= factor * 1.05 // Slightly greenish stain
+				if stain > 0.35 {
+					v *= 1.0 - (stain-0.35)*0.25
 				}
 			}
 
-			// Global subtle vignette (darker at top/bottom)
-			vigY := math.Abs(fy-0.5) * 2
-			vig := 1.0 - vigY*vigY*0.1
-			r *= vig
-			g *= vig
-			b *= vig
-
-			img.SetRGBA(px, py, color.RGBA{clampU8(r), clampU8(g), clampU8(b), 255})
+			c := clampU8(v)
+			img.SetRGBA(px, py, color.RGBA{c, c, c, 255})
 		}
 	}
 
@@ -274,20 +233,17 @@ func generateSideWall() image.Image {
 	img := image.NewRGBA(image.Rect(0, 0, texW, texH))
 	n1 := newNoise(73)
 	n2 := newNoise(211)
+	n3 := newNoise(999)
 	rng := rand.New(rand.NewSource(31))
-
-	// Slightly darker and more worn for side walls
-	baseR, baseG, baseB := 100.0, 92.0, 78.0
-	mortarR, mortarG, mortarB := 48.0, 43.0, 37.0
 
 	type block struct {
 		x, y, w, h int
-		rOff, gOff, bOff float64
+		valOff      float64
 	}
 
 	var blocks []block
-	rowH := []int{60, 55, 65, 58, 62, 53, 67, 56}
-	mortarW := 3
+	rowH := []int{120, 110, 130, 116, 124, 106, 134, 112}
+	mortarW := 6
 	y := 0
 	row := 0
 	for y < texH {
@@ -295,7 +251,7 @@ func generateSideWall() image.Image {
 		if y+h > texH {
 			h = texH - y
 		}
-		colW := []int{80, 70, 90, 75, 85, 68, 92}
+		colW := []int{160, 140, 180, 150, 170, 136, 184}
 		offset := 0
 		if row%2 == 1 {
 			offset = colW[0] / 2
@@ -306,9 +262,7 @@ func generateSideWall() image.Image {
 			w := colW[col%len(colW)]
 			blocks = append(blocks, block{
 				x: x, y: y, w: w, h: h,
-				rOff: rng.Float64()*20 - 10,
-				gOff: rng.Float64()*20 - 10,
-				bOff: rng.Float64()*14 - 7,
+				valOff: rng.Float64()*16 - 8,
 			})
 			x += w + mortarW
 			col++
@@ -316,6 +270,9 @@ func generateSideWall() image.Image {
 		y += h + mortarW
 		row++
 	}
+
+	base := 140.0
+	mortarBase := 40.0
 
 	for py := 0; py < texH; py++ {
 		for px := 0; px < texW; px++ {
@@ -342,40 +299,24 @@ func generateSideWall() image.Image {
 				}
 			}
 
-			var r, g, bv float64
+			var v float64
 			if inMortar || blk == nil {
-				mn := n1.fbm(fx*18, fy*18, 3, 2.0, 0.5) * 8
-				r = mortarR + mn
-				g = mortarG + mn*0.9
-				bv = mortarB + mn*0.8
-				r *= 0.8
-				g *= 0.8
-				bv *= 0.8
+				mn := n1.fbm(fx*18, fy*18, 3, 2.0, 0.5) * 5
+				v = mortarBase + mn
 			} else {
-				r = baseR + blk.rOff
-				g = baseG + blk.gOff
-				bv = baseB + blk.bOff
+				v = base + blk.valOff
 
-				surf := n1.fbm(fx*8+blk.rOff*0.1, fy*8+blk.gOff*0.1, 5, 2.2, 0.55)
-				r += surf * 18
-				g += surf * 16
-				bv += surf * 13
+				surf := n1.fbm(fx*6+blk.valOff*0.1, fy*6+blk.valOff*0.1, 5, 2.2, 0.55)
+				v += surf * 20
 
-				grain := n2.fbm(fx*30, fy*30, 3, 2.0, 0.5)
-				r += grain * 7
-				g += grain * 6
-				bv += grain * 5
+				grain := n2.fbm(fx*24, fy*24, 4, 2.0, 0.5)
+				v += grain * 9
 
-				// More pronounced moss/moisture staining on side walls
-				moss := n2.fbm(fx*3+2.0, fy*5+1.0, 4, 2.0, 0.6)
-				if moss > 0.2 {
-					intensity := (moss - 0.2) * 0.4
-					r *= (1.0 - intensity)
-					g *= (1.0 - intensity*0.3)
-					bv *= (1.0 - intensity*0.8)
+				crack := n3.fbm(fx*10, fy*10, 4, 2.5, 0.6)
+				if crack > 0.3 {
+					v -= (crack - 0.3) * 30
 				}
 
-				// Edge AO
 				bx := px
 				if bx < blk.x {
 					bx += texW
@@ -383,21 +324,18 @@ func generateSideWall() image.Image {
 				dx := float64(min(bx-blk.x, blk.x+blk.w-1-bx))
 				dy := float64(min(py-blk.y, blk.y+blk.h-1-py))
 				edgeDist := math.Min(dx, dy)
-				if edgeDist < 8 {
-					ao := 1.0 - (8-edgeDist)/8*0.3
-					r *= ao
-					g *= ao
-					bv *= ao
+				if edgeDist < 12 {
+					v *= 1.0 - (12-edgeDist)/12*0.3
+				}
+
+				stain := n2.fbm(fx*4+0.5, fy*4+0.5, 3, 2.0, 0.5)
+				if stain > 0.35 {
+					v *= 1.0 - (stain-0.35)*0.2
 				}
 			}
 
-			// Vertical moisture gradient (darker toward bottom)
-			moistGrad := 1.0 - fy*0.15
-			r *= moistGrad
-			g *= moistGrad
-			bv *= moistGrad
-
-			img.SetRGBA(px, py, color.RGBA{clampU8(r), clampU8(g), clampU8(bv), 255})
+			c := clampU8(v)
+			img.SetRGBA(px, py, color.RGBA{c, c, c, 255})
 		}
 	}
 
@@ -410,8 +348,7 @@ func generateFloor() image.Image {
 	n2 := newNoise(189)
 	n3 := newNoise(333)
 
-	// Flagstone floor
-	baseR, baseG, baseB := 75.0, 68.0, 58.0
+	base := 80.0
 
 	// Generate irregular flagstones using voronoi-like pattern
 	type point struct{ x, y float64 }
@@ -450,64 +387,38 @@ func generateFloor() image.Image {
 
 			edgeDist := d2 - d1
 
-			var r, g, b float64
+			var v float64
 			if edgeDist < 0.015 {
-				// Mortar/gap between flagstones
-				r = 35
-				g = 30
-				b = 25
-				// Slight noise in mortar
+				v = 32.0
 				mn := n1.fbm(fx*25, fy*25, 2, 2.0, 0.5) * 5
-				r += mn
-				g += mn
-				b += mn
+				v += mn
 			} else {
-				// Stone surface with per-cell variation
 				cellNoise := n1.fbm(fx*3+d1*10, fy*3+d1*10, 2, 2.0, 0.5)
-				r = baseR + cellNoise*15
-				g = baseG + cellNoise*13
-				b = baseB + cellNoise*10
+				v = base + cellNoise*14
 
-				// Surface texture
 				surf := n2.fbm(fx*16, fy*16, 5, 2.0, 0.5)
-				r += surf * 12
-				g += surf * 10
-				b += surf * 8
+				v += surf * 10
 
-				// Fine roughness
 				fine := n3.fbm(fx*40, fy*40, 2, 2.0, 0.5)
-				r += fine * 5
-				g += fine * 4
-				b += fine * 3
+				v += fine * 5
 
-				// Edge shadow near flagstone borders
 				if edgeDist < 0.04 {
-					shadow := (0.04 - edgeDist) / 0.04 * 0.3
-					r *= (1.0 - shadow)
-					g *= (1.0 - shadow)
-					b *= (1.0 - shadow)
+					v *= 1.0 - (0.04-edgeDist)/0.04*0.3
 				}
 
-				// Wear patterns - lighter in center of well-trodden areas
 				wear := n1.fbm(fx*2, fy*2, 2, 2.0, 0.5)
 				if wear > 0.3 {
-					lighten := (wear - 0.3) * 8
-					r += lighten
-					g += lighten
-					b += lighten
+					v += (wear - 0.3) * 8
 				}
 
-				// Scattered dark spots (old stains, dirt)
 				dirt := n2.fbm(fx*6+3.0, fy*6+3.0, 3, 2.0, 0.6)
 				if dirt > 0.4 {
-					factor := 1.0 - (dirt-0.4)*0.35
-					r *= factor
-					g *= factor
-					b *= factor
+					v *= 1.0 - (dirt-0.4)*0.35
 				}
 			}
 
-			img.SetRGBA(px, py, color.RGBA{clampU8(r), clampU8(g), clampU8(b), 255})
+			c := clampU8(v)
+			img.SetRGBA(px, py, color.RGBA{c, c, c, 255})
 		}
 	}
 
@@ -520,61 +431,41 @@ func generateCeiling() image.Image {
 	n2 := newNoise(277)
 	n3 := newNoise(451)
 
-	// Rough hewn stone ceiling - darker, more uniform
-	baseR, baseG, baseB := 60.0, 55.0, 48.0
+	base := 75.0
 
 	for py := 0; py < texH; py++ {
 		for px := 0; px < texW; px++ {
 			fx := float64(px) / float64(texW)
 			fy := float64(py) / float64(texH)
 
-			r, g, b := baseR, baseG, baseB
+			v := base
 
-			// Large-scale undulation (rough hewn surface)
 			undulate := n1.fbm(fx*4, fy*4, 4, 2.0, 0.6)
-			r += undulate * 15
-			g += undulate * 13
-			b += undulate * 10
+			v += undulate * 14
 
-			// Medium detail
 			med := n2.fbm(fx*12, fy*12, 4, 2.2, 0.5)
-			r += med * 10
-			g += med * 9
-			b += med * 7
+			v += med * 9
 
-			// Fine rough texture
 			fine := n3.fbm(fx*35, fy*35, 3, 2.0, 0.5)
-			r += fine * 6
-			g += fine * 5
-			b += fine * 4
+			v += fine * 5
 
-			// Soot/smoke darkening in patches
 			soot := n1.fbm(fx*5+10.0, fy*5+10.0, 3, 2.0, 0.5)
 			if soot > 0.2 {
-				factor := 1.0 - (soot-0.2)*0.3
-				r *= factor
-				g *= factor
-				b *= factor
+				v *= 1.0 - (soot-0.2)*0.3
 			}
 
-			// Occasional lighter mineral deposits
 			mineral := n2.fbm(fx*8+5.0, fy*3+5.0, 2, 2.0, 0.5)
 			if mineral > 0.45 {
-				lighten := (mineral - 0.45) * 15
-				r += lighten
-				g += lighten * 1.1
-				b += lighten * 0.9
+				v += (mineral - 0.45) * 12
 			}
 
-			// Subtle cracks
 			crack := n3.fbm(fx*6, fy*10, 3, 2.5, 0.6)
 			if crack > 0.42 && crack < 0.46 {
-				r *= 0.7
-				g *= 0.7
-				b *= 0.7
+				v *= 0.7
 			}
 
-			img.SetRGBA(px, py, color.RGBA{clampU8(r), clampU8(g), clampU8(b), 255})
+			c := clampU8(v)
+			img.SetRGBA(px, py, color.RGBA{c, c, c, 255})
 		}
 	}
 
@@ -716,17 +607,17 @@ func generateDoorFrame() image.Image {
 	n3 := newNoise(401)
 	rng := rand.New(rand.NewSource(53))
 
-	baseR, baseG, baseB := 95.0, 87.0, 74.0
-	mortarR, mortarG, mortarB := 48.0, 43.0, 37.0
+	base := 130.0
+	mortarBase := 40.0
 
 	type block struct {
-		x, y, w, h           int
-		rOff, gOff, bOff     float64
+		x, y, w, h int
+		valOff      float64
 	}
 
 	var blocks []block
-	rowH := []int{64, 58, 70, 56, 62, 66, 54, 68}
-	mortarW := 3
+	rowH := []int{128, 116, 140, 112, 124, 132, 108, 136}
+	mortarW := 6
 	y := 0
 	row := 0
 	for y < texH {
@@ -734,7 +625,7 @@ func generateDoorFrame() image.Image {
 		if y+h > texH {
 			h = texH - y
 		}
-		colW := []int{85, 75, 95, 80}
+		colW := []int{170, 150, 190, 160}
 		offset := 0
 		if row%2 == 1 {
 			offset = colW[0] / 2
@@ -745,9 +636,7 @@ func generateDoorFrame() image.Image {
 			w := colW[col%len(colW)]
 			blocks = append(blocks, block{
 				x: x, y: y, w: w, h: h,
-				rOff: rng.Float64()*14 - 7,
-				gOff: rng.Float64()*14 - 7,
-				bOff: rng.Float64()*10 - 5,
+				valOff: rng.Float64()*14 - 7,
 			})
 			x += w + mortarW
 			col++
@@ -756,7 +645,6 @@ func generateDoorFrame() image.Image {
 		row++
 	}
 
-	// Door track: a vertical groove centered in the texture
 	trackWidth := texW / 5
 	trackLeft := (texW - trackWidth) / 2
 	trackRight := trackLeft + trackWidth
@@ -791,73 +679,36 @@ func generateDoorFrame() image.Image {
 				}
 			}
 
-			var r, g, b float64
+			var v float64
 
 			if inTrack {
-				// Recessed groove — darker stone with vertical scoring
-				r, g, b = 42.0, 38.0, 32.0
-
-				// Vertical score marks from the door sliding
+				v = 38.0
 				score := n1.fbm(fx*4, fy*40, 3, 2.0, 0.5)
-				r += score * 6
-				g += score * 5
-				b += score * 4
-
+				v += score * 5
 				grain := n2.fbm(fx*20, fy*20, 3, 2.0, 0.5)
-				r += grain * 4
-				g += grain * 3
-				b += grain * 3
+				v += grain * 3
 
-				// Edge shadow at track borders
 				distToLeft := float64(px - trackLeft)
 				distToRight := float64(trackRight - px)
 				edgeDist := math.Min(distToLeft, distToRight)
 				if edgeDist < float64(trackInset) {
-					shadow := 1.0 - (float64(trackInset)-edgeDist)/float64(trackInset)*0.5
-					r *= shadow
-					g *= shadow
-					b *= shadow
-				}
-
-				// Wear/polish in the center of the track
-				center := float64(trackLeft+trackRight) / 2
-				distToCenter := math.Abs(float64(px) - center)
-				maxDist := float64(trackRight-trackLeft) / 2
-				if distToCenter < maxDist*0.4 {
-					polish := 1.0 + (1.0-distToCenter/(maxDist*0.4))*0.15
-					r *= polish
-					g *= polish
-					b *= polish
+					v *= 1.0 - (float64(trackInset)-edgeDist)/float64(trackInset)*0.5
 				}
 			} else if inMortar || blk == nil {
-				mn := n1.fbm(fx*18, fy*18, 3, 2.0, 0.5) * 8
-				r = mortarR + mn
-				g = mortarG + mn*0.9
-				b = mortarB + mn*0.8
-				r *= 0.8
-				g *= 0.8
-				b *= 0.8
+				mn := n1.fbm(fx*18, fy*18, 3, 2.0, 0.5) * 5
+				v = mortarBase + mn
 			} else {
-				r = baseR + blk.rOff
-				g = baseG + blk.gOff
-				b = baseB + blk.bOff
+				v = base + blk.valOff
 
-				surf := n1.fbm(fx*8+blk.rOff*0.1, fy*8+blk.gOff*0.1, 5, 2.2, 0.55)
-				r += surf * 18
-				g += surf * 16
-				b += surf * 13
+				surf := n1.fbm(fx*6+blk.valOff*0.1, fy*6+blk.valOff*0.1, 5, 2.2, 0.55)
+				v += surf * 18
 
-				grain := n2.fbm(fx*30, fy*30, 3, 2.0, 0.5)
-				r += grain * 7
-				g += grain * 6
-				b += grain * 5
+				grain := n2.fbm(fx*24, fy*24, 4, 2.0, 0.5)
+				v += grain * 7
 
-				crack := n3.fbm(fx*12, fy*12, 4, 2.5, 0.6)
-				if crack > 0.35 {
-					darkening := (crack - 0.35) * 25
-					r -= darkening
-					g -= darkening
-					b -= darkening
+				crack := n3.fbm(fx*10, fy*10, 4, 2.5, 0.6)
+				if crack > 0.3 {
+					v -= (crack - 0.3) * 25
 				}
 
 				bx := px
@@ -867,20 +718,13 @@ func generateDoorFrame() image.Image {
 				dx := float64(min(bx-blk.x, blk.x+blk.w-1-bx))
 				dy := float64(min(py-blk.y, blk.y+blk.h-1-py))
 				edgeDist := math.Min(dx, dy)
-				if edgeDist < 8 {
-					ao := 1.0 - (8-edgeDist)/8*0.3
-					r *= ao
-					g *= ao
-					b *= ao
+				if edgeDist < 12 {
+					v *= 1.0 - (12-edgeDist)/12*0.3
 				}
 			}
 
-			moistGrad := 1.0 - fy*0.12
-			r *= moistGrad
-			g *= moistGrad
-			b *= moistGrad
-
-			img.SetRGBA(px, py, color.RGBA{clampU8(r), clampU8(g), clampU8(b), 255})
+			c := clampU8(v)
+			img.SetRGBA(px, py, color.RGBA{c, c, c, 255})
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/hajimehoshi/ebiten/v2"
 	"github.com/hajimehoshi/ebiten/v2/ebitenutil"
+	"github.com/hajimehoshi/ebiten/v2/inpututil"
 	"github.com/jbetancur/the-legend-of-irondeep/engine"
 	"github.com/jbetancur/the-legend-of-irondeep/render"
 )
@@ -22,6 +23,8 @@ type Game struct {
 	frame     int
 	walkViews []walkView
 	walkIdx   int
+	layoutW   int
+	layoutH   int
 }
 
 type walkView struct {
@@ -64,6 +67,10 @@ func NewGame() *Game {
 func (g *Game) Update() error {
 	if ebiten.IsKeyPressed(ebiten.KeyEscape) {
 		os.Exit(0)
+	}
+
+	if inpututil.IsKeyJustPressed(ebiten.KeyF11) {
+		ebiten.SetFullscreen(!ebiten.IsFullscreen())
 	}
 
 	if g.walkDir == "" {
@@ -127,5 +134,13 @@ func (g *Game) saveShot(screen *ebiten.Image, path string) {
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
+	if outsideWidth > 0 && outsideHeight > 0 {
+		if outsideWidth != g.layoutW || outsideHeight != g.layoutH {
+			g.layoutW = outsideWidth
+			g.layoutH = outsideHeight
+			g.viewport = render.NewViewport(g.viewport.Assets, outsideWidth, outsideHeight)
+		}
+		return outsideWidth, outsideHeight
+	}
 	return ScreenWidth, ScreenHeight
 }

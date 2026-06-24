@@ -13,9 +13,10 @@ const (
 )
 
 func main() {
-	ebiten.SetWindowSize(960, 540)
+	ebiten.SetWindowSize(ScreenWidth, ScreenHeight)
 	ebiten.SetWindowTitle("The Legend of Irondeep")
 	ebiten.SetWindowResizingMode(ebiten.WindowResizingModeEnabled)
+	ebiten.SetFullscreen(false)
 
 	game := NewGame()
 	if len(os.Args) > 2 && os.Args[1] == "-shot" {
