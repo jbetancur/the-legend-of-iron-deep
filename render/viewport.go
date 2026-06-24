@@ -8,6 +8,8 @@ import (
 )
 
 const (
+	ScreenW       = 1920
+	ScreenH       = 1080
 	BaseViewportH = 540
 	maxDepth      = 2
 )
